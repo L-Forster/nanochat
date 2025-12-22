@@ -122,8 +122,9 @@ model.init_weights()
 
 # If we are resuming, overwrite the model parameters with those of the checkpoint
 base_dir = get_base_dir()
+project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 output_dirname = model_tag if model_tag else f"d{depth}" # e.g. d12
-checkpoint_dir = os.path.join(base_dir, "base_checkpoints", output_dirname)
+checkpoint_dir = os.path.join(project_dir, "checkpoints", output_dirname)
 resuming = resume_from_step != -1
 if resuming:
     print0(f"Resuming optimization from step {resume_from_step}")

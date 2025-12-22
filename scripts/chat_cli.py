@@ -13,6 +13,7 @@ from nanochat.checkpoint_manager import load_model
 
 parser = argparse.ArgumentParser(description='Chat with the model')
 parser.add_argument('-i', '--source', type=str, default="sft", help="Source of the model: sft|mid|rl")
+parser.add_argument('-c', '--checkpoint-dir', type=str, default=None, help='Direct path to checkpoint directory')
 parser.add_argument('-g', '--model-tag', type=str, default=None, help='Model tag to load')
 parser.add_argument('-s', '--step', type=int, default=None, help='Step to load')
 parser.add_argument('-p', '--prompt', type=str, default='', help='Prompt the model, get a single response back')
@@ -28,7 +29,29 @@ device_type = autodetect_device_type() if args.device_type == "" else args.devic
 ddp, ddp_rank, ddp_local_rank, ddp_world_size, device = compute_init(device_type)
 ptdtype = torch.float32 if args.dtype == 'float32' else torch.bfloat16
 autocast_ctx = torch.amp.autocast(device_type=device_type, dtype=ptdtype) if device_type == "cuda" else nullcontext()
-model, tokenizer, meta = load_model(args.source, device, phase="eval", model_tag=args.model_tag, step=args.step)
+if args.checkpoint_dir:
+    import os
+    from nanochat.checkpoint_manager import load_checkpoint, find_last_step
+    from nanochat.gpt import GPT, GPTConfig
+    from nanochat.tokenizer import RustBPETokenizer
+    # Load from weights/ subdir
+    weights_dir = os.path.join(args.checkpoint_dir, "weights")
+    step = args.step if args.step else find_last_step(weights_dir)
+    model_data, _, meta = load_checkpoint(weights_dir, step, device)
+    if device.type in {"cpu", "mps"}:
+        model_data = {k: v.float() if v.dtype == torch.bfloat16 else v for k, v in model_data.items()}
+    model_data = {k.removeprefix("_orig_mod."): v for k, v in model_data.items()}
+    with torch.device("meta"):
+        model = GPT(GPTConfig(**meta["model_config"]))
+    model.to_empty(device=device)
+    model.init_weights()
+    model.load_state_dict(model_data, strict=True, assign=True)
+    model.eval()
+    # Load from tokenizer/ subdir
+    tokenizer_dir = os.path.join(args.checkpoint_dir, "tokenizer")
+    tokenizer = RustBPETokenizer.from_directory(tokenizer_dir)
+else:
+    model, tokenizer, meta = load_model(args.source, device, phase="eval", model_tag=args.model_tag, step=args.step)
 
 # Special tokens for the chat state machine
 bos = tokenizer.get_bos_token_id()
