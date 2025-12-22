@@ -205,12 +205,16 @@ class Engine:
         rng.manual_seed(seed)
 
         # Get the special tokens we need to coordinate the tool use state machine
-        get_special = lambda s: self.tokenizer.encode_special(s)
-        python_start = get_special("<|python_start|>")
-        python_end = get_special("<|python_end|>")
-        output_start = get_special("<|output_start|>")
-        output_end = get_special("<|output_end|>")
-        assistant_end = get_special("<|assistant_end|>") # if sampled, ends row
+        def get_special_safe(s):
+            try:
+                return self.tokenizer.encode_special(s)
+            except (KeyError, ValueError):
+                return None
+        python_start = get_special_safe("<|python_start|>")
+        python_end = get_special_safe("<|python_end|>")
+        output_start = get_special_safe("<|output_start|>")
+        output_end = get_special_safe("<|output_end|>")
+        assistant_end = get_special_safe("<|assistant_end|>")
         bos = self.tokenizer.get_bos_token_id() # if sampled, ends row
 
         # 1) Run a batch 1 prefill of the prompt tokens
@@ -276,22 +280,24 @@ class Engine:
                 # Update the state of this row to include the next token
                 state.current_tokens.append(next_token)
                 # On <|assistant_end|> or <|bos|>, mark the row as completed
-                if next_token == assistant_end or next_token == bos:
+                if next_token == bos or (assistant_end is not None and next_token == assistant_end):
                     state.completed = True
-                # Handle tool logic
-                if next_token == python_start:
+                # Handle tool logic (only if tokens exist)
+                if python_start is not None and next_token == python_start:
                     state.in_python_block = True
                     state.python_expr_tokens = []
-                elif next_token == python_end and state.in_python_block:
+                elif python_end is not None and next_token == python_end and state.in_python_block:
                     state.in_python_block = False
                     if state.python_expr_tokens:
                         expr = self.tokenizer.decode(state.python_expr_tokens)
                         result = use_calculator(expr)
                         if result is not None:
                             result_tokens = self.tokenizer.encode(str(result))
-                            state.forced_tokens.append(output_start)
+                            if output_start is not None:
+                                state.forced_tokens.append(output_start)
                             state.forced_tokens.extend(result_tokens)
-                            state.forced_tokens.append(output_end)
+                            if output_end is not None:
+                                state.forced_tokens.append(output_end)
                     state.python_expr_tokens = []
                 elif state.in_python_block:
                     state.python_expr_tokens.append(next_token)
