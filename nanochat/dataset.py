@@ -25,6 +25,8 @@ MAX_SHARD = 1822 # the last datashard is shard_01822.parquet
 index_to_filename = lambda index: f"shard_{index:05d}.parquet" # format of the filenames
 base_dir = get_base_dir()
 DATA_DIR = os.path.join(base_dir, "base_data")
+_project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+HANSARD_DATA_DIR = os.path.join(_project_dir, "data", "hansard_data")
 os.makedirs(DATA_DIR, exist_ok=True)
 
 # -----------------------------------------------------------------------------
@@ -109,20 +111,54 @@ def download_single_file(index):
     return False
 
 
+def download_hansard():
+    """Download UK Hansard and save as parquets."""
+    import unicodedata
+    import pyarrow as pa
+    from datasets import load_dataset
+    
+    project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    hansard_dir = os.path.join(project_dir, "data", "hansard_data")
+    os.makedirs(hansard_dir, exist_ok=True)
+    
+    print("Downloading UK Hansard...")
+    dataset = load_dataset("common-pile/uk_hansard", split="train")
+    
+    texts = []
+    shard_idx = 0
+    for i, ex in enumerate(dataset):
+        texts.append(unicodedata.normalize("NFKC", ex["text"]))
+        if len(texts) >= 10000:
+            table = pa.table({"text": texts})
+            path = os.path.join(hansard_dir, f"shard_{shard_idx:05d}.parquet")
+            pq.write_table(table, path, row_group_size=1024)
+            print(f"Wrote {path}")
+            texts = []
+            shard_idx += 1
+    if texts:
+        table = pa.table({"text": texts})
+        path = os.path.join(hansard_dir, f"shard_{shard_idx:05d}.parquet")
+        pq.write_table(table, path, row_group_size=1024)
+        print(f"Wrote {path}")
+    print(f"Done! Saved to {hansard_dir}")
+
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Download FineWeb-Edu 100BT dataset shards")
-    parser.add_argument("-n", "--num-files", type=int, default=-1, help="Number of shards to download (default: -1), -1 = disable")
-    parser.add_argument("-w", "--num-workers", type=int, default=4, help="Number of parallel download workers (default: 4)")
+    parser = argparse.ArgumentParser(description="Download dataset shards")
+    parser.add_argument("-n", "--num-files", type=int, default=-1, help="Number of shards to download (default: -1)")
+    parser.add_argument("-w", "--num-workers", type=int, default=4, help="Number of parallel workers (default: 4)")
+    parser.add_argument("--hansard", action="store_true", help="Download UK Hansard instead of FineWeb")
     args = parser.parse_args()
 
-    num = MAX_SHARD + 1 if args.num_files == -1 else min(args.num_files, MAX_SHARD + 1)
-    ids_to_download = list(range(num))
-    print(f"Downloading {len(ids_to_download)} shards using {args.num_workers} workers...")
-    print(f"Target directory: {DATA_DIR}")
-    print()
-    with Pool(processes=args.num_workers) as pool:
-        results = pool.map(download_single_file, ids_to_download)
-
-    # Report results
-    successful = sum(1 for success in results if success)
-    print(f"Done! Downloaded: {successful}/{len(ids_to_download)} shards to {DATA_DIR}")
+    if args.hansard:
+        download_hansard()
+    else:
+        num = MAX_SHARD + 1 if args.num_files == -1 else min(args.num_files, MAX_SHARD + 1)
+        ids_to_download = list(range(num))
+        print(f"Downloading {len(ids_to_download)} shards using {args.num_workers} workers...")
+        print(f"Target directory: {DATA_DIR}")
+        print()
+        with Pool(processes=args.num_workers) as pool:
+            results = pool.map(download_single_file, ids_to_download)
+        successful = sum(1 for success in results if success)
+        print(f"Done! Downloaded: {successful}/{len(ids_to_download)} shards to {DATA_DIR}")

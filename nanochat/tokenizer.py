@@ -160,11 +160,25 @@ class RustBPETokenizer:
         self.bos_token_id = self.encode_special(bos_token)
 
     @classmethod
-    def train_from_iterator(cls, text_iterator, vocab_size):
+    def train_from_iterator(cls, text_iterator, vocab_size, special_tokens=None):
+        """
+        Train a BPE tokenizer from an iterator of text documents.
+
+        Args:
+            text_iterator: Iterator yielding text strings to train on
+            vocab_size: Target vocabulary size (including special tokens)
+            special_tokens: Optional list of special tokens. Defaults to SPECIAL_TOKENS.
+                           First token is assumed to be the BOS token.
+        """
+        # Use default special tokens if not provided
+        if special_tokens is None:
+            special_tokens = SPECIAL_TOKENS
+        bos_token = special_tokens[0]  # First token is BOS by convention
+
         # 1) train using rustbpe
         tokenizer = rustbpe.Tokenizer()
         # the special tokens are inserted later in __init__, we don't train them here
-        vocab_size_no_special = vocab_size - len(SPECIAL_TOKENS)
+        vocab_size_no_special = vocab_size - len(special_tokens)
         assert vocab_size_no_special >= 256, f"vocab_size_no_special must be at least 256, got {vocab_size_no_special}"
         tokenizer.train_from_iterator(text_iterator, vocab_size_no_special, pattern=SPLIT_PATTERN)
         # 2) construct the associated tiktoken encoding for inference
@@ -172,14 +186,14 @@ class RustBPETokenizer:
         mergeable_ranks_list = tokenizer.get_mergeable_ranks()
         mergeable_ranks = {bytes(k): v for k, v in mergeable_ranks_list}
         tokens_offset = len(mergeable_ranks)
-        special_tokens = {name: tokens_offset + i for i, name in enumerate(SPECIAL_TOKENS)}
+        special_tokens_dict = {name: tokens_offset + i for i, name in enumerate(special_tokens)}
         enc = tiktoken.Encoding(
             name="rustbpe",
             pat_str=pattern,
             mergeable_ranks=mergeable_ranks, # dict[bytes, int] (token bytes -> merge priority rank)
-            special_tokens=special_tokens, # dict[str, int] (special token name -> token id)
+            special_tokens=special_tokens_dict, # dict[str, int] (special token name -> token id)
         )
-        return cls(enc, "<|bos|>")
+        return cls(enc, bos_token)
 
     @classmethod
     def from_directory(cls, tokenizer_dir):
@@ -379,18 +393,41 @@ class RustBPETokenizer:
 # -----------------------------------------------------------------------------
 # nanochat-specific convenience functions
 
-def get_tokenizer():
-    from nanochat.common import get_base_dir
-    base_dir = get_base_dir()
-    tokenizer_dir = os.path.join(base_dir, "tokenizer")
-    # return HuggingFaceTokenizer.from_directory(tokenizer_dir)
+def get_tokenizer(name="default"):
+    """
+    Get a tokenizer by name.
+    Args:
+        name: "default" for fineweb tokenizer, "hansard" for UK Hansard tokenizer
+    """
+    if name == "default":
+        from nanochat.common import get_base_dir
+        base_dir = get_base_dir()
+        tokenizer_dir = os.path.join(base_dir, "tokenizer")
+    elif name == "hansard":
+        # Hansard tokenizer is stored in project data/ directory
+        project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        tokenizer_dir = os.path.join(project_dir, "data", "tokenizer_hansard")
+    else:
+        raise ValueError(f"Unknown tokenizer name: {name}")
     return RustBPETokenizer.from_directory(tokenizer_dir)
 
-def get_token_bytes(device="cpu"):
+def get_token_bytes(device="cpu", name="default"):
+    """
+    Get token bytes mapping for bits-per-byte evaluation.
+    Args:
+        device: Target device
+        name: "default" for fineweb tokenizer, "hansard" for UK Hansard tokenizer
+    """
     import torch
-    from nanochat.common import get_base_dir
-    base_dir = get_base_dir()
-    tokenizer_dir = os.path.join(base_dir, "tokenizer")
+    if name == "default":
+        from nanochat.common import get_base_dir
+        base_dir = get_base_dir()
+        tokenizer_dir = os.path.join(base_dir, "tokenizer")
+    elif name == "hansard":
+        project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        tokenizer_dir = os.path.join(project_dir, "data", "tokenizer_hansard")
+    else:
+        raise ValueError(f"Unknown tokenizer name: {name}")
     token_bytes_path = os.path.join(tokenizer_dir, "token_bytes.pt")
     assert os.path.exists(token_bytes_path), f"Token bytes not found at {token_bytes_path}? It gets written by tok_train.py"
     with open(token_bytes_path, "rb") as f:
