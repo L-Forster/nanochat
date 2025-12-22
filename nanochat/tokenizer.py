@@ -393,54 +393,42 @@ class RustBPETokenizer:
 # -----------------------------------------------------------------------------
 # nanochat-specific convenience functions
 
-def get_tokenizer(name=None):
+def get_tokenizer(name="default"):
     """
-    Get a tokenizer. Auto-detects which one is available if name not specified.
+    Get a tokenizer by name.
+    Args:
+        name: "default" for fineweb tokenizer, "hansard" for UK Hansard tokenizer
     """
-    from nanochat.common import get_base_dir
-    project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    hansard_dir = os.path.join(project_dir, "data", "tokenizer_hansard")
-    default_dir = os.path.join(get_base_dir(), "tokenizer")
-    
-    hansard_exists = os.path.exists(os.path.join(hansard_dir, "tokenizer.pkl"))
-    default_exists = os.path.exists(os.path.join(default_dir, "tokenizer.pkl"))
-    
-    if name == "hansard":
-        tokenizer_dir = hansard_dir
-    elif name == "default":
-        tokenizer_dir = default_dir
-    elif name is None and hansard_exists:
-        tokenizer_dir = hansard_dir
-    elif name is None and default_exists:
-        tokenizer_dir = default_dir
+    if name == "default":
+        from nanochat.common import get_base_dir
+        base_dir = get_base_dir()
+        tokenizer_dir = os.path.join(base_dir, "tokenizer")
+    elif name == "hansard":
+        project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        tokenizer_dir = os.path.join(project_dir, "data", "tokenizer_hansard")
     else:
-        raise ValueError(f"No tokenizer found. Train one first.")
+        raise ValueError(f"Unknown tokenizer name: {name}")
     return RustBPETokenizer.from_directory(tokenizer_dir)
 
-def get_token_bytes(device="cpu", name=None):
+def get_token_bytes(device="cpu", name="default"):
     """
-    Get token bytes mapping for bits-per-byte evaluation. Auto-detects tokenizer.
+    Get token bytes mapping for bits-per-byte evaluation.
+    Args:
+        device: Target device
+        name: "default" for fineweb tokenizer, "hansard" for UK Hansard tokenizer
     """
     import torch
-    from nanochat.common import get_base_dir
-    project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    hansard_dir = os.path.join(project_dir, "data", "tokenizer_hansard")
-    default_dir = os.path.join(get_base_dir(), "tokenizer")
-    
-    hansard_exists = os.path.exists(os.path.join(hansard_dir, "token_bytes.pt"))
-    default_exists = os.path.exists(os.path.join(default_dir, "token_bytes.pt"))
-    
-    if name == "hansard":
-        tokenizer_dir = hansard_dir
-    elif name == "default":
-        tokenizer_dir = default_dir
-    elif name is None and hansard_exists:
-        tokenizer_dir = hansard_dir
-    elif name is None and default_exists:
-        tokenizer_dir = default_dir
+    if name == "default":
+        from nanochat.common import get_base_dir
+        base_dir = get_base_dir()
+        tokenizer_dir = os.path.join(base_dir, "tokenizer")
+    elif name == "hansard":
+        project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        tokenizer_dir = os.path.join(project_dir, "data", "tokenizer_hansard")
     else:
-        raise ValueError(f"No tokenizer found. Train one first.")
+        raise ValueError(f"Unknown tokenizer name: {name}")
     token_bytes_path = os.path.join(tokenizer_dir, "token_bytes.pt")
+    assert os.path.exists(token_bytes_path), f"Token bytes not found at {token_bytes_path}? It gets written by tok_train.py"
     with open(token_bytes_path, "rb") as f:
         token_bytes = torch.load(f, map_location=device)
     return token_bytes
